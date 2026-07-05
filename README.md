@@ -1,6 +1,6 @@
 # Learn Chess
 
-A complete client-side chess learning app inspired by the Magnus Carlsen Learn Chess / Magnus Trainer flow. Runs entirely in the browser with progress saved to `localStorage` — perfect for hosting on GitHub Pages.
+A complete client-side chess learning app with interactive lessons, puzzles, and engine play. Runs entirely in the browser with progress saved to `localStorage` — perfect for hosting on GitHub Pages.
 
 ## Features
 

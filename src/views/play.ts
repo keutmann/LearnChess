@@ -23,7 +23,7 @@ export function renderPlay(params: Record<string, string>): void {
     <section class="page play-page">
       <div class="page-header">
         <h1>Play vs Engine</h1>
-        <p>Challenge opponents of increasing strength — inspired by the Play Magnus concept.</p>
+        <p>Challenge opponents of increasing strength — from beginner to grandmaster level.</p>
       </div>
       ${coachBubble('Pick your opponent. Start with Beginner and work your way up to Grandmaster!')}
       <div class="opponent-grid">
