@@ -83,12 +83,13 @@ export class ChessBoard {
 
   private setupResize(): void {
     this.resizeObserver?.disconnect();
-    const updateSize = () => {
-      const width = this.container.clientWidth;
-      if (width > 0) this.container.style.height = `${width}px`;
-    };
-    updateSize();
-    this.resizeObserver = new ResizeObserver(updateSize);
+    // Sizing is handled by CSS (aspect-ratio + max-height). We only need to
+    // ask Chessground to recompute its bounds when the element size changes.
+    let raf = 0;
+    this.resizeObserver = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => this.api?.redrawAll());
+    });
     this.resizeObserver.observe(this.container);
   }
 

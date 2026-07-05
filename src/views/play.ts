@@ -6,12 +6,15 @@ import { awardXp, checkAchievements, updateStreak } from '../core/xp';
 import { renderLayout, coachBubble, showToast } from '../components/layout';
 import { navigate } from '../core/router';
 import { ChessBoard } from '../core/chess-board';
-import { getEngine } from '../core/engine';
+import { getEngine, resetEngine } from '../core/engine';
 
 let board: ChessBoard | null = null;
 let gameChess: Chess | null = null;
 let engineBusy = false;
 let gameOver = false;
+let activeEngine: Awaited<ReturnType<typeof getEngine>> | null = null;
+let activeOpponent: typeof OPPONENT_LEVELS[0] | null = null;
+let awaitingEngineLoad = false;
 
 export function renderPlay(params: Record<string, string>): void {
   if (params.game === '1' && params.opponent) {
@@ -52,21 +55,31 @@ async function startGame(opponentId: string): Promise<void> {
   gameChess = new Chess();
   engineBusy = false;
   gameOver = false;
+  activeEngine = null;
+  activeOpponent = opponent;
+  awaitingEngineLoad = false;
   board?.destroy();
   board = null;
 
   renderLayout(`
-    <section class="page game-page">
-      <div class="game-header">
-        <button class="btn-back" data-back>← Resign</button>
-        <div class="game-info">
-          <h2>vs ${opponent.name}</h2>
-          <span class="game-status" id="game-status">Loading engine…</span>
+    <section class="page game-page board-page">
+      <div class="board-stage">
+        <div class="board-stage__board">
+          <div class="chess-board" id="game-board"></div>
         </div>
-      </div>
-      <div class="board-wrap"><div class="chess-board" id="game-board"></div></div>
-      <div class="game-actions">
-        <button class="btn btn-secondary" id="new-game" disabled>New Game</button>
+        <div class="board-stage__side">
+          <div class="game-header">
+            <button class="btn-back" data-back>← Resign</button>
+            <div class="game-info">
+              <h2>vs ${opponent.name}</h2>
+              <span class="game-status" id="game-status">Loading engine…</span>
+            </div>
+          </div>
+          <div class="game-actions">
+            <button class="btn btn-secondary" id="new-game" disabled>New Game</button>
+            <button class="btn btn-primary" id="retry-engine" hidden>Retry Engine</button>
+          </div>
+        </div>
       </div>
     </section>
   `, '/play');
@@ -77,28 +90,48 @@ async function startGame(opponentId: string): Promise<void> {
   document.getElementById('new-game')?.addEventListener('click', () => {
     navigate(`/play?game=1&opponent=${opponentId}`);
   });
+  document.getElementById('retry-engine')?.addEventListener('click', () => {
+    resetEngine();
+    navigate(`/play?game=1&opponent=${opponentId}`);
+  });
 
+  // Mount the board immediately so it always shows, even while the engine
+  // (a large WASM download) is still loading or if it fails to load.
+  const el = document.getElementById('game-board');
+  if (!el) return;
+  board = new ChessBoard(el);
+  board.mount({
+    fen: gameChess.fen(),
+    orientation: getProgress().settings.boardOrientation,
+    movable: true,
+    color: 'white',
+    onMove: (from, to) => handlePlayerMove(from, to),
+  });
+  setStatus('Loading engine… (you can move as White)');
+
+  // Load the engine in the background.
   try {
     const engine = await getEngine();
     engine.newGame();
     engine.setSkillLevel(opponent.skill);
+    activeEngine = engine;
 
-    const el = document.getElementById('game-board')!;
-    board = new ChessBoard(el);
-    board.mount({
-      fen: gameChess.fen(),
-      orientation: getProgress().settings.boardOrientation,
-      movable: true,
-      color: 'white',
-      onMove: (from, to) => handlePlayerMove(from, to, opponent, engine),
-    });
+    const newGameBtn = document.getElementById('new-game') as HTMLButtonElement | null;
+    if (newGameBtn) newGameBtn.disabled = false;
 
-    setStatus('Your turn (White)');
-    (document.getElementById('new-game') as HTMLButtonElement).disabled = false;
+    if (gameOver) return;
+    if (awaitingEngineLoad && gameChess && gameChess.turn() === 'b') {
+      awaitingEngineLoad = false;
+      void engineReply();
+    } else {
+      setStatus('Your turn (White)');
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Engine failed to load';
-    setStatus(`Error: ${msg}`);
-    showToast('Could not load chess engine. Check that engine files are available.', 'error');
+    setStatus(`Engine error: ${msg}`);
+    const retry = document.getElementById('retry-engine');
+    if (retry) retry.hidden = false;
+    showToast('Could not load chess engine. Tap "Retry Engine".', 'error');
   }
 }
 
@@ -107,12 +140,7 @@ function setStatus(text: string): void {
   if (el) el.textContent = text;
 }
 
-function handlePlayerMove(
-  from: Key,
-  to: Key,
-  opponent: typeof OPPONENT_LEVELS[0],
-  engine: Awaited<ReturnType<typeof getEngine>>
-): boolean {
+function handlePlayerMove(from: Key, to: Key): boolean {
   if (!gameChess || !board || engineBusy || gameOver) return false;
   if (gameChess.turn() !== 'w') return false;
 
@@ -121,17 +149,23 @@ function handlePlayerMove(
   // Sync game state from board's chess instance
   gameChess = new Chess(board.getChess().fen());
 
-  if (handleGameEnd(opponent)) return true;
+  if (handleGameEnd()) return true;
 
-  void engineReply(engine, opponent);
+  if (activeEngine) {
+    void engineReply();
+  } else {
+    // Player moved before the engine finished loading — reply once it's ready.
+    awaitingEngineLoad = true;
+    board.updateMovable(false);
+    setStatus('Waiting for engine to finish loading…');
+  }
   return true;
 }
 
-async function engineReply(
-  engine: Awaited<ReturnType<typeof getEngine>>,
-  opponent: typeof OPPONENT_LEVELS[0]
-): Promise<void> {
-  if (!gameChess || !board || gameChess.isGameOver() || gameOver) return;
+async function engineReply(): Promise<void> {
+  const engine = activeEngine;
+  const opponent = activeOpponent;
+  if (!engine || !opponent || !gameChess || !board || gameChess.isGameOver() || gameOver) return;
 
   engineBusy = true;
   board.updateMovable(false);
@@ -157,7 +191,7 @@ async function engineReply(
       gameChess = new Chess(board.getChess().fen());
     }
 
-    if (!handleGameEnd(opponent)) {
+    if (!handleGameEnd()) {
       setStatus('Your turn (White)');
       board.updateMovable(true, 'white');
     }
@@ -170,8 +204,9 @@ async function engineReply(
   }
 }
 
-function handleGameEnd(opponent: typeof OPPONENT_LEVELS[0]): boolean {
-  if (!gameChess || !board) return false;
+function handleGameEnd(): boolean {
+  if (!gameChess || !board || !activeOpponent) return false;
+  const opponent = activeOpponent;
 
   if (gameChess.isCheckmate()) {
     gameOver = true;

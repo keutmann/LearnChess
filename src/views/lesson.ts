@@ -35,27 +35,51 @@ export function renderLesson(params: Record<string, string>): void {
     const step = lesson.steps[stepIndex];
     const isLast = stepIndex >= lesson.steps.length - 1;
     const progress = Math.round((stepIndex / lesson.steps.length) * 100);
+    const isBoardStep = step.type === 'board' || step.type === 'highlight' || step.type === 'move';
 
-    renderLayout(`
-      <section class="page lesson-page">
-        <div class="lesson-header">
-          <button class="btn-back" data-back>← Back</button>
-          <div class="lesson-meta">
-            <h1>${lesson.title}</h1>
-            <div class="lesson-progress"><div class="lesson-progress-bar" style="width:${progress}%"></div></div>
-            <span class="step-counter">Step ${stepIndex + 1} of ${lesson.steps.length}</span>
+    const header = `
+      <div class="lesson-header">
+        <button class="btn-back" data-back>← Back</button>
+        <div class="lesson-meta">
+          <h1>${lesson.title}</h1>
+          <div class="lesson-progress"><div class="lesson-progress-bar" style="width:${progress}%"></div></div>
+          <span class="step-counter">Step ${stepIndex + 1} of ${lesson.steps.length}</span>
+        </div>
+      </div>`;
+
+    const actions = `
+      <div class="lesson-actions" id="lesson-actions">
+        ${step.type === 'move' ? `<button class="btn btn-secondary" id="hint-btn">💡 Hint</button>` : ''}
+        ${step.type !== 'move' && step.type !== 'quiz' ? `
+          <button class="btn btn-primary" id="next-btn">${isLast ? 'Complete Lesson ✓' : 'Continue →'}</button>
+        ` : ''}
+      </div>`;
+
+    if (isBoardStep) {
+      renderLayout(`
+        <section class="page lesson-page board-page">
+          <div class="board-stage">
+            <div class="board-stage__board">
+              <div class="chess-board" id="lesson-board"></div>
+            </div>
+            <div class="board-stage__side">
+              ${header}
+              ${coachBubble(step.coach)}
+              ${actions}
+            </div>
           </div>
-        </div>
-        ${coachBubble(step.coach)}
-        <div class="lesson-body" id="lesson-body">${renderStep(step)}</div>
-        <div class="lesson-actions" id="lesson-actions">
-          ${step.type === 'move' ? `<button class="btn btn-secondary" id="hint-btn">💡 Hint</button>` : ''}
-          ${step.type !== 'move' && step.type !== 'quiz' ? `
-            <button class="btn btn-primary" id="next-btn">${isLast ? 'Complete Lesson ✓' : 'Continue →'}</button>
-          ` : ''}
-        </div>
-      </section>
-    `, '/courses');
+        </section>
+      `, '/courses');
+    } else {
+      renderLayout(`
+        <section class="page lesson-page">
+          ${header}
+          ${coachBubble(step.coach)}
+          <div class="lesson-body" id="lesson-body">${renderStep(step)}</div>
+          ${actions}
+        </section>
+      `, '/courses');
+    }
 
     document.querySelector('[data-back]')?.addEventListener('click', () => navigate('/courses'));
 

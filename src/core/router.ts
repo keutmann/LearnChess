@@ -8,9 +8,15 @@ export function registerRoute(path: string, handler: RouteHandler): void {
 }
 
 export function navigate(path: string): void {
-  if (path === currentPath) return;
-  currentPath = path;
-  window.location.hash = path;
+  const target = path.startsWith('/') ? path : `/${path}`;
+  const currentHash = window.location.hash.slice(1);
+
+  if (target === currentHash) {
+    // Same hash — hashchange won't fire, so re-render manually
+    void handleRoute();
+    return;
+  }
+  window.location.hash = target;
 }
 
 export function getCurrentPath(): string {

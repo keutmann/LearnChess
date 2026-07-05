@@ -1,9 +1,21 @@
 type EngineCallback = (line: string) => void;
 
 function resolveEngineUrls(): { js: string; wasm: string } {
-  const js = new URL('engine/stockfish.js', window.location.href).href;
-  const wasm = new URL('engine/stockfish.wasm', window.location.href).href;
+  const base = import.meta.env.BASE_URL || '/';
+  const js = new URL(`${base}engine/stockfish.js`, window.location.href).href;
+  const wasm = new URL(`${base}engine/stockfish.wasm`, window.location.href).href;
   return { js, wasm };
+}
+
+function firstWord(line: string): string {
+  const space = line.indexOf(' ');
+  return space === -1 ? line : line.slice(0, space);
+}
+
+function normalizeEngineData(data: unknown): string {
+  if (typeof data === 'string') return data;
+  if (data == null) return '';
+  return String(data);
 }
 
 export class StockfishEngine {
@@ -13,6 +25,8 @@ export class StockfishEngine {
   private resolveReady: (() => void) | null = null;
   private rejectReady: ((err: Error) => void) | null = null;
   private readyPromise: Promise<void>;
+  private initTimeout: ReturnType<typeof setTimeout> | null = null;
+  private ready = false;
 
   constructor() {
     this.readyPromise = new Promise((resolve, reject) => {
@@ -22,43 +36,77 @@ export class StockfishEngine {
   }
 
   async init(): Promise<void> {
+    if (this.worker && this.ready) return;
     if (this.worker) return this.readyPromise;
 
     const { js, wasm } = resolveEngineUrls();
 
     try {
-      this.worker = new Worker(`${js}#${wasm},worker`);
+      // Official stockfish.js pattern: worker URL is js#wasm (wasm path in hash).
+      this.worker = new Worker(`${js}#${wasm}`);
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Failed to start engine worker');
       this.rejectReady?.(error);
+      this.rejectReady = null;
       throw error;
     }
 
-    const timeout = setTimeout(() => {
-      this.rejectReady?.(new Error('Engine timed out while loading'));
-    }, 30000);
+    this.initTimeout = setTimeout(() => {
+      const error = new Error('Engine timed out while loading (WASM download may be slow)');
+      this.rejectReady?.(error);
+      this.rejectReady = null;
+      this.worker?.terminate();
+      this.worker = null;
+    }, 60000);
 
     this.worker.onerror = (e) => {
-      clearTimeout(timeout);
+      if (this.initTimeout) clearTimeout(this.initTimeout);
       const error = new Error(e.message || 'Engine worker error');
-      this.rejectReady?.(error);
+      if (!this.ready) {
+        this.rejectReady?.(error);
+        this.rejectReady = null;
+      }
     };
 
-    this.worker.onmessage = (e: MessageEvent<string>) => {
-      const line = typeof e.data === 'string' ? e.data : String(e.data);
-      this.onMessage?.(line);
-      if (line === 'uciok') {
-        clearTimeout(timeout);
-        this.resolveReady?.();
-      }
-      if (line.startsWith('bestmove')) {
-        this.searching = false;
-      }
+    this.worker.onmessage = (e: MessageEvent) => {
+      this.dispatchLines(normalizeEngineData(e.data));
     };
 
     this.send('uci');
     await this.readyPromise;
     this.send('isready');
+  }
+
+  private dispatchLines(raw: string): void {
+    if (!raw) return;
+
+    if (raw.includes('\n')) {
+      for (const part of raw.split('\n')) {
+        this.dispatchLine(part);
+      }
+      return;
+    }
+
+    this.dispatchLine(raw);
+  }
+
+  private dispatchLine(raw: string): void {
+    const line = raw.trim();
+    if (!line) return;
+
+    this.onMessage?.(line);
+
+    if (!this.ready && firstWord(line) === 'uciok') {
+      this.ready = true;
+      if (this.initTimeout) clearTimeout(this.initTimeout);
+      this.resolveReady?.();
+      this.resolveReady = null;
+      this.rejectReady = null;
+    }
+
+    if (firstWord(line) === 'bestmove') {
+      this.searching = false;
+    }
   }
 
   send(cmd: string): void {
@@ -85,7 +133,7 @@ export class StockfishEngine {
       }, movetime + 5000);
 
       const handler = (line: string) => {
-        if (line.startsWith('bestmove')) {
+        if (firstWord(line) === 'bestmove') {
           clearTimeout(timeout);
           const parts = line.split(' ');
           this.onMessage = prev;
@@ -108,9 +156,11 @@ export class StockfishEngine {
   }
 
   destroy(): void {
+    if (this.initTimeout) clearTimeout(this.initTimeout);
     this.send('quit');
     this.worker?.terminate();
     this.worker = null;
+    this.ready = false;
   }
 }
 
@@ -120,10 +170,16 @@ let engineInitPromise: Promise<StockfishEngine> | null = null;
 export async function getEngine(): Promise<StockfishEngine> {
   if (!engineInitPromise) {
     engineInitPromise = (async () => {
-      if (!sharedEngine) sharedEngine = new StockfishEngine();
-      await sharedEngine.init();
-      return sharedEngine;
-    })();
+      const engine = new StockfishEngine();
+      await engine.init();
+      sharedEngine = engine;
+      return engine;
+    })().catch((err) => {
+      engineInitPromise = null;
+      sharedEngine?.destroy();
+      sharedEngine = null;
+      throw err;
+    });
   }
   return engineInitPromise;
 }

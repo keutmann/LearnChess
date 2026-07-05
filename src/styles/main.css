@@ -556,10 +556,66 @@ body {
 
 .chess-board {
   width: 100%;
-  aspect-ratio: 1;
+  max-width: 480px;
+  aspect-ratio: 1 / 1;
+  /* Never let the board push the page into a vertical scroll */
+  max-height: calc(100dvh - 210px);
+  margin: 0 auto;
   border-radius: var(--radius-sm);
   overflow: hidden;
   box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+
+/* Board stage: scales the board to the viewport and, on wide/landscape
+   screens, moves the text + buttons into a side column on the right. */
+.board-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.board-stage__board {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.board-stage__side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+@media (min-aspect-ratio: 1 / 1) and (min-width: 760px) {
+  .board-page .main-content {
+    max-width: 1200px;
+  }
+
+  .board-stage {
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 1.75rem;
+  }
+
+  .board-stage__board {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
+  .board-stage__board .chess-board {
+    height: min(calc(100dvh - 150px), 78vw);
+    width: auto;
+    max-width: none;
+    max-height: none;
+  }
+
+  .board-stage__side {
+    flex: 1 1 0;
+    min-width: 260px;
+    max-width: 420px;
+    align-self: center;
+  }
 }
 
 /* Puzzles */

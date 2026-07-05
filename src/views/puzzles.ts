@@ -83,24 +83,33 @@ function playPuzzle(puzzle: Puzzle): void {
   const render = () => {
     board?.destroy();
     renderLayout(`
-      <section class="page puzzle-play-page">
-        <div class="lesson-header">
-          <button class="btn-back" data-back>← Back</button>
-          <h1>${puzzle.description}</h1>
+      <section class="page puzzle-play-page board-page">
+        <div class="board-stage">
+          <div class="board-stage__board">
+            <div class="chess-board" id="puzzle-board"></div>
+          </div>
+          <div class="board-stage__side">
+            <div class="lesson-header">
+              <button class="btn-back" data-back>← Back</button>
+              <h1>${puzzle.description}</h1>
+            </div>
+            ${coachBubble(moveIndex === 0 ? 'Find the best continuation. You play as ' + (puzzleChess!.turn() === 'w' ? 'White' : 'Black') + '.' : 'Keep going!')}
+            <div class="puzzle-hint-row">
+              <button class="btn btn-secondary" id="show-solution">Show Solution</button>
+              <button class="btn btn-primary" id="next-puzzle">Next Puzzle →</button>
+            </div>
+            <p class="puzzle-meta">Rating ${puzzle.rating} · ${puzzle.themes.join(', ')}</p>
+          </div>
         </div>
-        ${coachBubble(moveIndex === 0 ? 'Find the best continuation. You play as ' + (puzzleChess!.turn() === 'w' ? 'White' : 'Black') + '.' : 'Keep going!')}
-        <div class="board-wrap"><div class="chess-board" id="puzzle-board"></div></div>
-        <div class="puzzle-hint-row">
-          <button class="btn btn-secondary" id="show-solution">Show Solution</button>
-          <button class="btn btn-secondary" id="next-puzzle">Next Puzzle</button>
-        </div>
-        <p class="puzzle-meta">Rating ${puzzle.rating} · ${puzzle.themes.join(', ')}</p>
       </section>
     `, '/puzzles');
 
     document.querySelector('[data-back]')?.addEventListener('click', () => navigate('/puzzles'));
     document.getElementById('show-solution')?.addEventListener('click', () => showSolution());
-    document.getElementById('next-puzzle')?.addEventListener('click', () => navigate('/puzzles'));
+    document.getElementById('next-puzzle')?.addEventListener('click', () => {
+      const next = pickNextPuzzle(puzzle.id);
+      navigate(`/puzzles?mode=play&id=${next}`);
+    });
 
     const el = document.getElementById('puzzle-board')!;
     board = new ChessBoard(el);
@@ -118,7 +127,17 @@ function playPuzzle(puzzle: Puzzle): void {
   render();
 }
 
-function handlePuzzleMove(from: Key, to: Key, _redraw: () => void): boolean {
+function pickNextPuzzle(currentId: string): string {
+  // Prefer a due/new puzzle that isn't the current one, otherwise cycle to the next in order.
+  const dueIds = getDuePuzzles(PUZZLES.map((p) => p.id)).filter((id) => id !== currentId);
+  if (dueIds.length) return dueIds[0];
+
+  const idx = PUZZLES.findIndex((p) => p.id === currentId);
+  const next = PUZZLES[(idx + 1) % PUZZLES.length];
+  return next.id;
+}
+
+function handlePuzzleMove(from: Key, to: Key): boolean {
   if (!currentPuzzle || !puzzleChess || !board) return false;
 
   const expected = currentPuzzle.solution[moveIndex];
